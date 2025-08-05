@@ -1,15 +1,18 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { MobileLayout } from "@/components/MobileLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { useFinance } from "@/hooks/useFinance";
 import { Link } from "react-router-dom";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval } from "date-fns";
+import { X } from "lucide-react";
 
 export default function Dashboard() {
   const { transactions, categories, loading } = useFinance();
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
 
   // Prepare data for current month
   const currentMonth = new Date();
@@ -22,8 +25,14 @@ export default function Dashboard() {
     
     return days.map(day => {
       const dayStr = format(day, 'yyyy-MM-dd');
-      const dayExpenses = transactions
-        .filter(t => t.type === 'expense' && t.date === dayStr)
+      let dayTransactions = transactions.filter(t => t.type === 'expense' && t.date === dayStr);
+      
+      // Apply category filter if selected
+      if (selectedCategoryId) {
+        dayTransactions = dayTransactions.filter(t => t.category_id === selectedCategoryId);
+      }
+      
+      const dayExpenses = dayTransactions
         .reduce((sum, t) => sum + t.amount, 0);
       
       return {
@@ -31,7 +40,7 @@ export default function Dashboard() {
         amount: dayExpenses
       };
     }).filter(d => d.amount > 0);
-  }, [transactions, monthStart, monthEnd]);
+  }, [transactions, monthStart, monthEnd, selectedCategoryId]);
 
   // Category-wise expenses for pie chart
   const categoryData = useMemo(() => {
@@ -62,20 +71,38 @@ export default function Dashboard() {
       return transactionDate >= monthStart && transactionDate <= monthEnd;
     });
 
-    const income = currentMonthTransactions
+    let filteredTransactions = currentMonthTransactions;
+    
+    // Apply category filter for expenses if selected
+    if (selectedCategoryId) {
+      filteredTransactions = currentMonthTransactions.map(t => {
+        if (t.type === 'expense' && t.category_id !== selectedCategoryId) {
+          return { ...t, amount: 0 }; // Zero out non-matching expenses
+        }
+        return t;
+      });
+    }
+
+    const income = filteredTransactions
       .filter(t => t.type === 'income')
       .reduce((sum, t) => sum + t.amount, 0);
 
-    const expenses = currentMonthTransactions
+    const expenses = filteredTransactions
       .filter(t => t.type === 'expense')
       .reduce((sum, t) => sum + t.amount, 0);
 
-    const savings = currentMonthTransactions
+    const savings = filteredTransactions
       .filter(t => t.type === 'savings_transfer')
       .reduce((sum, t) => sum + t.amount, 0);
 
     return { income, expenses, savings };
-  }, [transactions, monthStart, monthEnd]);
+  }, [transactions, monthStart, monthEnd, selectedCategoryId]);
+
+  const clearFilter = () => {
+    setSelectedCategoryId('');
+  };
+
+  const selectedCategory = categories.find(c => c.id === selectedCategoryId);
 
   if (loading) {
     return (
@@ -128,9 +155,61 @@ export default function Dashboard() {
         {/* Daily Spending Bar Chart */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Daily Spending</CardTitle>
+            <div className="flex justify-between items-center">
+              <CardTitle className="text-lg">
+                Daily Spending
+                {selectedCategory && (
+                  <span className="text-sm font-normal text-muted-foreground ml-2">
+                    - {selectedCategory.name}
+                  </span>
+                )}
+              </CardTitle>
+              <div className="flex items-center space-x-2">
+                {selectedCategoryId && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearFilter}
+                    className="h-8 px-2"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+                <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue placeholder="Filter by category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">All Categories</SelectItem>
+                    {categories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        <div className="flex items-center space-x-2">
+                          <div 
+                            className="w-3 h-3 rounded-full" 
+                            style={{ backgroundColor: category.color }}
+                          />
+                          <span>{category.name}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
+            {dailyData.length === 0 && selectedCategoryId ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <p>No expenses found for {selectedCategory?.name} this month</p>
+                <Button variant="ghost" size="sm" onClick={clearFilter} className="mt-2">
+                  Clear filter to see all expenses
+                </Button>
+              </div>
+            ) : dailyData.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <p>No expenses recorded this month</p>
+              </div>
+            ) : (
             <div className="chart-container">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={dailyData}>
@@ -157,12 +236,13 @@ export default function Dashboard() {
                   />
                   <Bar 
                     dataKey="amount" 
-                    fill="hsl(var(--primary))"
+                    fill={selectedCategory ? selectedCategory.color : "hsl(var(--primary))"}
                     radius={[4, 4, 0, 0]}
                   />
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            )}
           </CardContent>
         </Card>
 
